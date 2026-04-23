@@ -169,20 +169,31 @@ Return ONLY the JSON object.`;
     for (const s of sessions) {
       const dbSubject = subjects.find((sub) => sub.id === parseInt(s.subjectId));
       if (dbSubject) {
-        // Convert local time string (HH:mm) to UTC Date
-        const [startH, startM] = s.startTime.split(':').map(Number);
-        const [endH, endM] = s.endTime.split(':').map(Number);
+        try {
+          if (!s.startTime || !s.endTime || !s.date) continue;
 
-        const startDateLocal = new Date(`${s.date}T00:00:00Z`); // Using Z just to get a stable base
-        const startTimeUtc = new Date(startDateLocal.getTime() + (startH * 60 + startM - tzOffset) * 60 * 1000);
-        const endTimeUtc = new Date(startDateLocal.getTime() + (endH * 60 + endM - tzOffset) * 60 * 1000);
+          const startParts = s.startTime.split(':');
+          const endParts = s.endTime.split(':');
+          if (startParts.length !== 2 || endParts.length !== 2) continue;
 
-        createdSessions.push({
-          subjectId: dbSubject.id,
-          startTime: startTimeUtc,
-          endTime: endTimeUtc,
-          focusTopic: s.focusTopic,
-        });
+          const [startH, startM] = startParts.map(Number);
+          const [endH, endM] = endParts.map(Number);
+
+          const startDateLocal = new Date(`${s.date}T00:00:00Z`);
+          if (isNaN(startDateLocal.getTime())) continue;
+
+          const startTimeUtc = new Date(startDateLocal.getTime() + (startH * 60 + startM - tzOffset) * 60 * 1000);
+          const endTimeUtc = new Date(startDateLocal.getTime() + (endH * 60 + endM - tzOffset) * 60 * 1000);
+
+          createdSessions.push({
+            subjectId: dbSubject.id,
+            startTime: startTimeUtc,
+            endTime: endTimeUtc,
+            focusTopic: s.focusTopic || "General Study",
+          });
+        } catch (e) {
+          console.error("Session transform error", e);
+        }
       }
     }
 

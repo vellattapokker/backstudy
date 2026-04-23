@@ -210,9 +210,11 @@ const toggleSession = async (req, res) => {
                 // Remove difficulty info like "(Difficulty: 3/5)" for a cleaner match if needed
                 const cleanTopicName = session.focusTopic.split('(')[0].trim();
 
+                // Global User Sync: Search across ALL subjects belonging to this user
+                // to handle cases where topics might be linked slightly differently
                 await prisma.topic.updateMany({
                     where: {
-                        subjectId: session.subjectId,
+                        subject: { userId: req.userId },
                         name: { contains: cleanTopicName, mode: 'insensitive' }
                     },
                     data: { isCompleted: true }
