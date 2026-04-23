@@ -64,6 +64,33 @@ const generateAIStudyPlan = async (req, res) => {
       upcomingDates.push(d.toISOString().split('T')[0]);
     }
 
+    // Calculate work already done TODAY to adjust the first day's availability
+    const todayUserStart = new Date(upcomingDates[0] + 'T00:00:00Z');
+    const startRangeUtc = new Date(todayUserStart.getTime() - (tzOffset * 60 * 1000));
+    const endRangeTodayUtc = new Date(startRangeUtc.getTime() + 24 * 60 * 60 * 1000 - 1);
+
+    const doneStudySessions = await prisma.studySession.findMany({
+      where: {
+        subject: { userId },
+        isDone: true,
+        startTime: { gte: startRangeUtc, lte: endRangeTodayUtc }
+      }
+    });
+    const donePomodoros = await prisma.pomodoroSession.findMany({
+      where: {
+        userId,
+        completedAt: { gte: startRangeUtc, lte: endRangeTodayUtc }
+      }
+    });
+
+    const doneMinsToday = doneStudySessions.reduce((acc, s) => acc + (new Date(s.endTime) - new Date(s.startTime)) / (1000 * 60), 0) +
+      donePomodoros.reduce((acc, p) => acc + p.durationMinutes, 0);
+    const doneHoursToday = doneMinsToday / 60;
+
+    // Adjust first day's hours in prompt
+    const hoursForTodayPrompt = Math.max(0, hoursPerDay - doneHoursToday);
+    console.log(`[AI Planner] User ${userId} already did ${doneHoursToday.toFixed(2)}h. Today's prompt hours: ${hoursForTodayPrompt.toFixed(2)}`);
+
     const startHour = preferredStartHour || 9;
     const startTimeFormatted = `${startHour}:00 ${startHour >= 12 ? 'PM' : 'AM'}`;
 
@@ -75,7 +102,8 @@ const generateAIStudyPlan = async (req, res) => {
       .join("\n");
 
     const prompt = `You are an AI Study Planner. Create a ${studyDays}-day optimized study schedule.
-Available study time: ${hoursPerDay} hours per day.
+Available study time for Day 1 (Today): ${hoursForTodayPrompt.toFixed(1)} hours.
+Available study time for subsequent days: ${hoursPerDay} hours per day.
 User Timezone Offset: ${tzOffset} minutes (GMT${tzOffset <= 0 ? '+' : '-'}${Math.abs(tzOffset / 60)})
 
 Subjects & Topics (Use these IDs):
@@ -126,8 +154,7 @@ Return ONLY the JSON object.`;
     const sessions = aiResponse.schedule || aiResponse.sessions || [];
 
     // 4. Clear old sessions from the start of the user's TODAY (local 00:00)
-    const todayUserStart = new Date(upcomingDates[0] + 'T00:00:00Z');
-    const startRangeUtc = new Date(todayUserStart.getTime() - (tzOffset * 60 * 1000));
+    // todayUserStart and startRangeUtc are already defined above
 
     // Safety: Also delete any sessions that might have been created for "today" already
     await prisma.studySession.deleteMany({

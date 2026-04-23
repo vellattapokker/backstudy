@@ -52,12 +52,34 @@ const generatePlan = async (req, res) => {
         const nowLocal = new Date(now.getTime() + (tzOffset * 60 * 1000));
         nowLocal.setUTCHours(0, 0, 0, 0);
         const startOfTodayUtc = new Date(nowLocal.getTime() - (tzOffset * 60 * 1000));
+        const endOfTodayUtc = new Date(startOfTodayUtc.getTime() + 24 * 60 * 60 * 1000 - 1);
+
+        // Fetch work already done TODAY to avoid over-scheduling
+        const doneStudySessions = await prisma.studySession.findMany({
+            where: {
+                subject: { userId: userId },
+                isDone: true,
+                startTime: { gte: startOfTodayUtc, lte: endOfTodayUtc }
+            }
+        });
+        const donePomodoros = await prisma.pomodoroSession.findMany({
+            where: {
+                userId: userId,
+                completedAt: { gte: startOfTodayUtc, lte: endOfTodayUtc }
+            }
+        });
+
+        const doneMinsToday = doneStudySessions.reduce((acc, s) => acc + (new Date(s.endTime) - new Date(s.startTime)) / (1000 * 60), 0) +
+            donePomodoros.reduce((acc, p) => acc + p.durationMinutes, 0);
+
+        const doneHoursToday = doneMinsToday / 60;
+        console.log(`[Planner] User ${userId} already did ${doneHoursToday.toFixed(2)}h today.`);
 
         const deletePromise = prisma.studySession.deleteMany({
             where: {
                 subject: { userId: userId },
-                startTime: { gte: startOfTodayUtc }, // Clear from the start of the user's TODAY
-                isDone: false // Don't delete completed ones
+                startTime: { gte: startOfTodayUtc }, // Clear all non-done sessions from start of user's today
+                isDone: false
             },
         });
 
@@ -74,8 +96,18 @@ const generatePlan = async (req, res) => {
             let currentStartTimeUtc = new Date(firstSessionStartUtc);
             currentStartTimeUtc.setUTCDate(currentStartTimeUtc.getUTCDate() + day);
 
+            // For Today (day 0), only schedule the REMAINING hours
+            const dailyTargetHours = day === 0
+                ? Math.max(0, dailyGoal - doneHoursToday)
+                : dailyGoal;
+
+            if (dailyTargetHours <= 0 && day === 0) {
+                console.log(`[Planner] Goal already met for today. Skipping today's scheduling.`);
+                continue;
+            }
+
             subjectWeights.forEach((sw, index) => {
-                const hoursForThisSubject = (sw.weight / totalWeight) * dailyGoal;
+                const hoursForThisSubject = (sw.weight / totalWeight) * dailyTargetHours;
                 if (hoursForThisSubject < 0.5) return; // Skip if less than 30 mins
 
                 const startTimeUtc = new Date(currentStartTimeUtc);

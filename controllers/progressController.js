@@ -101,22 +101,7 @@ const getOverallProgress = async (req, res) => {
             totalFocusMinutesThisWeek: totalFocusMinutesThisWeek || 0,
             streakDays: user?.streak || 0,
             // Deprecated field for compatibility
-            percentage: syllabusPercentage || 0,
-            debug: {
-                pomodoroMinutes,
-                doneStudySessionMinutes,
-                plannedMinutesToday,
-                allDailyStudySessionsCount: allDailyStudySessions.length,
-                doneStudySessionsCount: doneStudySessions.length,
-                tzOffset,
-                startOfTodayUtc: startOfTodayUtc.toISOString(),
-                endOfTodayUtc: endOfTodayUtc.toISOString(),
-                allSessions: allDailyStudySessions.map(s => ({
-                    id: s.id,
-                    isDone: s.isDone,
-                    mins: (new Date(s.endTime) - new Date(s.startTime)) / (1000 * 60)
-                }))
-            }
+            percentage: syllabusPercentage || 0
         });
     } catch (error) {
         console.error('getOverallProgress Error:', error);
