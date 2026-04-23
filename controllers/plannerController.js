@@ -43,7 +43,7 @@ const generatePlan = async (req, res) => {
                 daysUntilExam = Math.max(1, Math.ceil((earliestExam - now) / (1000 * 60 * 60 * 24)));
             }
             const weight = (subject.priority * subject.difficulty) / Math.sqrt(daysUntilExam);
-            return { id: subject.id, weight, topics: subject.topics };
+            return { id: subject.id, name: subject.name, weight, topics: subject.topics };
         });
 
         const totalWeight = subjectWeights.reduce((acc, s) => acc + s.weight, 0);
@@ -118,10 +118,10 @@ const generatePlan = async (req, res) => {
                 // Only schedule if it's in the future
                 if (startTimeUtc > now) {
                     // Pick a topic for this session (Syllabus Progress Fix)
-                    // We pick a topic based on rotation or just the first incomplete one
+                    // If no topics exist, use the subject name as a default focus topic
                     const focusTopic = sw.topics.length > 0
                         ? sw.topics[day % sw.topics.length].name
-                        : null;
+                        : sw.name;
 
                     sessionsToCreate.push({
                         subjectId: sw.id,
@@ -207,18 +207,28 @@ const toggleSession = async (req, res) => {
         // Topic Sync: If session is newly marked as done, try to mark the corresponding Topic as completed
         if (!session.isDone && updatedSession.isDone && session.focusTopic) {
             try {
-                // Remove difficulty info like "(Difficulty: 3/5)" for a cleaner match if needed
+                // Remove difficulty info for a cleaner match
                 const cleanTopicName = session.focusTopic.split('(')[0].trim();
 
-                // Global User Sync: Search across ALL subjects belonging to this user
-                // to handle cases where topics might be linked slightly differently
-                await prisma.topic.updateMany({
+                // 1. Try to update existing topics
+                const updateResult = await prisma.topic.updateMany({
                     where: {
                         subject: { userId: req.userId },
                         name: { contains: cleanTopicName, mode: 'insensitive' }
                     },
                     data: { isCompleted: true }
                 });
+
+                // 2. If no topic was updated, create a new one for this subject
+                if (updateResult.count === 0) {
+                    await prisma.topic.create({
+                        data: {
+                            name: cleanTopicName,
+                            isCompleted: true,
+                            subjectId: session.subjectId
+                        }
+                    });
+                }
             } catch (err) {
                 console.error("Topic Sync Error:", err);
             }

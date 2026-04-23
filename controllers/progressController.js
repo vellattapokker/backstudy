@@ -91,6 +91,14 @@ const getOverallProgress = async (req, res) => {
 
         const totalFocusMinutesThisWeek = weeklySessions.reduce((acc, s) => acc + s.durationMinutes, 0);
 
+        // 6. Time-based Overall Progress (Total Hours Done / Total Hours Planned)
+        const allStudySessions = await prisma.studySession.findMany({
+            where: { subject: { userId } }
+        });
+        const totalSyllabusMinutes = allStudySessions.reduce((acc, s) => acc + (new Date(s.endTime) - new Date(s.startTime)) / (1000 * 60), 0);
+        const doneSyllabusMinutes = allStudySessions.filter(s => s.isDone).reduce((acc, s) => acc + (new Date(s.endTime) - new Date(s.startTime)) / (1000 * 60), 0);
+        const timeProgressPercentage = totalSyllabusMinutes === 0 ? 0 : Math.min(100, Math.round((doneSyllabusMinutes / totalSyllabusMinutes) * 100));
+
         res.json({
             totalTopics: totalTopics || 0,
             completedTopics: completedTopics || 0,
@@ -100,8 +108,9 @@ const getOverallProgress = async (req, res) => {
             dailyProgressPercent: dailyProgressPercent || 0,
             totalFocusMinutesThisWeek: totalFocusMinutesThisWeek || 0,
             streakDays: user?.streak || 0,
-            // Deprecated field for compatibility
-            percentage: syllabusPercentage || 0
+            timeProgressPercentage: timeProgressPercentage,
+            // 'percentage' is now linked to DAILY PROGRESS (Hours vs Schedule)
+            percentage: dailyProgressPercent || 0
         });
     } catch (error) {
         console.error('getOverallProgress Error:', error);
