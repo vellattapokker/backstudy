@@ -102,14 +102,15 @@ const getOverallProgress = async (req, res) => {
         res.json({
             totalTopics: totalTopics || 0,
             completedTopics: completedTopics || 0,
-            syllabusPercentage: syllabusPercentage || 0,
+            topicProgressPercentage: syllabusPercentage || 0, // Original topic-based %
+            syllabusPercentage: timeProgressPercentage || 0, // NOW TIME-BASED for better "connected" feel
             totalHoursToday: totalHoursToday || 0,
             dailyGoal: dailyGoal || 4.0,
             dailyProgressPercent: dailyProgressPercent || 0,
             totalFocusMinutesThisWeek: totalFocusMinutesThisWeek || 0,
             streakDays: user?.streak || 0,
             timeProgressPercentage: timeProgressPercentage,
-            // 'percentage' is now linked to DAILY PROGRESS (Hours vs Schedule)
+            // 'percentage' is linked to DAILY PROGRESS (Hours vs Schedule)
             percentage: dailyProgressPercent || 0
         });
     } catch (error) {
