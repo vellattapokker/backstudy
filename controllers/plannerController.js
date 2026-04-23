@@ -75,11 +75,13 @@ const generatePlan = async (req, res) => {
         const doneHoursToday = doneMinsToday / 60;
         console.log(`[Planner] User ${userId} already did ${doneHoursToday.toFixed(2)}h today.`);
 
+        // 3. Clear sessions (Day 0 onwards)
+        // We delete ALL sessions for today onwards to allow a fresh start, 
+        // while preserving Pomodoro sessions which are pure recordings.
         const deletePromise = prisma.studySession.deleteMany({
             where: {
                 subject: { userId: userId },
-                startTime: { gte: startOfTodayUtc }, // Clear all non-done sessions from start of user's today
-                isDone: false
+                startTime: { gte: startOfTodayUtc },
             },
         });
 

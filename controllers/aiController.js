@@ -161,7 +161,6 @@ Return ONLY the JSON object.`;
       where: {
         subject: { userId },
         startTime: { gte: startRangeUtc },
-        isDone: false // Don't delete completed user work
       },
     });
 
