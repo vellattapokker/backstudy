@@ -5,8 +5,9 @@ const jwt = require('jsonwebtoken');
 const signup = async (req, res) => {
     try {
         const { email, password, name, course, semester } = req.body;
+        const normalizedEmail = email.toLowerCase().trim();
 
-        const existingUser = await prisma.user.findUnique({ where: { email } });
+        const existingUser = await prisma.user.findUnique({ where: { email: normalizedEmail } });
         if (existingUser) {
             return res.status(400).json({ message: 'User already exists' });
         }
@@ -16,12 +17,12 @@ const signup = async (req, res) => {
         // Bootstrap: Make the first user or specific emails an admin
         const userCount = await prisma.user.count();
         const isFirstUser = userCount === 0;
-        const isAdminEmail = email.toLowerCase().endsWith('@admin.com') || email === 'admin@studymate.com';
+        const isAdminEmail = normalizedEmail.endsWith('@admin.com') || normalizedEmail === 'admin@studymate.com';
         const role = (isFirstUser || isAdminEmail) ? 'admin' : 'student';
 
         const user = await prisma.user.create({
             data: {
-                email,
+                email: normalizedEmail,
                 password: hashedPassword,
                 name,
                 course,
@@ -42,11 +43,12 @@ const signup = async (req, res) => {
 const login = async (req, res) => {
     try {
         const { email, password } = req.body;
-        console.log(`Login attempt for: ${email}`);
+        const normalizedEmail = email.toLowerCase().trim();
+        console.log(`Login attempt for: ${normalizedEmail}`);
 
-        const user = await prisma.user.findUnique({ where: { email } });
+        const user = await prisma.user.findUnique({ where: { email: normalizedEmail } });
         if (!user) {
-            console.log(`Login failed: User ${email} not found in DB`);
+            console.log(`Login failed: User ${normalizedEmail} not found in DB`);
             return res.status(401).json({ message: 'Invalid credentials' });
         }
         
