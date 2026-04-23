@@ -30,7 +30,7 @@ const getOverallProgress = async (req, res) => {
         // 3. Correctly find the start of THE USER'S TODAY in UTC
         const now = new Date();
         const nowLocal = new Date(now.getTime() + (tzOffset * 60 * 1000));
-        nowLocal.setUTCHours(0, 0, 0, 0); 
+        nowLocal.setUTCHours(0, 0, 0, 0);
         const startOfTodayUtc = new Date(nowLocal.getTime() - (tzOffset * 60 * 1000));
 
         const endOfTodayUtc = new Date(startOfTodayUtc);
@@ -45,54 +45,78 @@ const getOverallProgress = async (req, res) => {
             }
         });
 
-        const dailyStudySessions = await prisma.studySession.findMany({
+        const allDailyStudySessions = await prisma.studySession.findMany({
             where: {
                 subject: { userId },
-                isDone: true,
                 startTime: { gte: startOfTodayUtc, lte: endOfTodayUtc }
             }
         });
 
+        const doneStudySessions = allDailyStudySessions.filter(s => s.isDone);
+
         // Calculate hours from Pomodoro (minutes) and StudySessions (duration)
         const pomodoroMinutes = dailyPomodoroSessions.reduce((acc, s) => acc + s.durationMinutes, 0);
-        const studySessionMinutes = dailyStudySessions.reduce((acc, s) => {
+        const doneStudySessionMinutes = doneStudySessions.reduce((acc, s) => {
             const duration = (new Date(s.endTime) - new Date(s.startTime)) / (1000 * 60);
             return acc + duration;
         }, 0);
 
-        const totalMinutesToday = pomodoroMinutes + studySessionMinutes;
+        const totalMinutesToday = pomodoroMinutes + doneStudySessionMinutes;
         const totalHoursToday = parseFloat((totalMinutesToday / 60).toFixed(2));
-        
-        console.log(`[Progress] User ${userId}: Sessions mins: ${studySessionMinutes}, Pom mins: ${pomodoroMinutes}, Total: ${totalHoursToday}h`);
-        console.log(`[Progress] Found ${dailyStudySessions.length} done sessions and ${dailyPomodoroSessions.length} poms.`);
-        
-        const dailyGoal = user?.dailyStudyGoal || 4.0;
+
+        // Calculate goal based on TOTAL planned sessions for today
+        const plannedMinutesToday = allDailyStudySessions.reduce((acc, s) => {
+            const duration = (new Date(s.endTime) - new Date(s.startTime)) / (1000 * 60);
+            return acc + duration;
+        }, 0);
+
+        const dailyGoal = plannedMinutesToday > 0
+            ? parseFloat((plannedMinutesToday / 60).toFixed(2))
+            : (user?.dailyStudyGoal || 4.0);
+
         const dailyProgressPercent = Math.min(100, Math.round((totalHoursToday / dailyGoal) * 100));
+
+        console.log(`[Progress] User ${userId}: Sessions mins: ${doneStudySessionMinutes}, Pom mins: ${pomodoroMinutes}, Total: ${totalHoursToday}h, Goal: ${dailyGoal}`);
 
         // 5. Weekly Stats
         const oneWeekAgo = new Date(now);
         oneWeekAgo.setUTCDate(oneWeekAgo.getUTCDate() - 7);
-        
+
         const weeklySessions = await prisma.pomodoroSession.findMany({
             where: {
                 userId,
                 completedAt: { gte: oneWeekAgo }
             }
         });
-        
+
         const totalFocusMinutesThisWeek = weeklySessions.reduce((acc, s) => acc + s.durationMinutes, 0);
 
-        res.json({ 
-            totalTopics: totalTopics || 0, 
-            completedTopics: completedTopics || 0, 
-            syllabusPercentage: syllabusPercentage || 0, 
-            totalHoursToday: totalHoursToday || 0, 
+        res.json({
+            totalTopics: totalTopics || 0,
+            completedTopics: completedTopics || 0,
+            syllabusPercentage: syllabusPercentage || 0,
+            totalHoursToday: totalHoursToday || 0,
             dailyGoal: dailyGoal || 4.0,
             dailyProgressPercent: dailyProgressPercent || 0,
-            totalFocusMinutesThisWeek: totalFocusMinutesThisWeek || 0, 
+            totalFocusMinutesThisWeek: totalFocusMinutesThisWeek || 0,
             streakDays: user?.streak || 0,
             // Deprecated field for compatibility
-            percentage: syllabusPercentage || 0 
+            percentage: syllabusPercentage || 0,
+            debug: {
+                pomodoroMinutes,
+                doneStudySessionMinutes,
+                plannedMinutesToday,
+                allDailyStudySessionsCount: allDailyStudySessions.length,
+                doneStudySessionsCount: doneStudySessions.length,
+                tzOffset,
+                startOfTodayUtc: startOfTodayUtc.toISOString(),
+                endOfTodayUtc: endOfTodayUtc.toISOString(),
+                allSessions: allDailyStudySessions.map(s => ({
+                    id: s.id,
+                    isDone: s.isDone,
+                    mins: (new Date(s.endTime) - new Date(s.startTime)) / (1000 * 60)
+                }))
+            }
         });
     } catch (error) {
         console.error('getOverallProgress Error:', error);
@@ -104,14 +128,14 @@ const logPomodoroSession = async (req, res) => {
     try {
         const userId = req.userId;
         const { durationMinutes } = req.body;
-        
+
         const session = await prisma.pomodoroSession.create({
             data: {
                 userId,
                 durationMinutes: durationMinutes || 25
             }
         });
-        
+
         res.status(201).json(session);
     } catch (error) {
         res.status(500).json({ message: error.message });

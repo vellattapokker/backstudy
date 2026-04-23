@@ -3,11 +3,11 @@ const prisma = require('../db');
 const generateStudyPlan = async (req, res) => {
     try {
         const userId = req.userId;
-        
+
         // Fetch user preferences
         const user = await prisma.user.findUnique({ where: { id: userId } });
-        const availableHours = user.dailyStudyHours || 4.0;
-        
+        const availableHours = user.dailyStudyGoal || 4.0;
+
         // Fetch active subjects with exams and topics
         const subjects = await prisma.subject.findMany({
             where: { userId },
@@ -29,12 +29,12 @@ const generateStudyPlan = async (req, res) => {
         let totalWeight = 0;
         subjects.forEach(sub => {
             let weight = 4 - sub.priority; // Priority 1 (High) -> weight 3. Priority 3 (Low) -> weight 1
-            
+
             // Boost weight if exam is within 14 days
             if (sub.exams && sub.exams.length > 0) {
                 const nextExam = sub.exams[0].date;
                 const daysUntilExam = Math.ceil((nextExam - today) / (1000 * 60 * 60 * 24));
-                
+
                 if (daysUntilExam > 0 && daysUntilExam <= 14) {
                     weight += (14 - daysUntilExam) * 0.5; // Up to +7 weight for immediate exams
                 }
@@ -46,12 +46,12 @@ const generateStudyPlan = async (req, res) => {
         // 2. Distribute daily available hours
         subjects.forEach(sub => {
             const allocatedHours = (sub.calculatedWeight / totalWeight) * availableHours;
-            
+
             // Only include subjects that get at least 30 minutes (0.5 hrs)
             if (allocatedHours >= 0.5) {
                 // Pick a topic to focus on
                 const focusTopic = sub.topics.length > 0 ? sub.topics[0].name : "General Review";
-                
+
                 plan.push({
                     subjectId: sub.id,
                     subjectName: sub.name,

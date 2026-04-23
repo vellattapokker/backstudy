@@ -12,12 +12,12 @@ const groq = new Groq({
 const generateAIStudyPlan = async (req, res) => {
   try {
     const userId = req.userId;
-    const { 
-      dailyStudyHours: requestedHours, 
-      days: requestedDays, 
-      subjectIds, 
+    const {
+      dailyStudyHours: requestedHours,
+      days: requestedDays,
+      subjectIds,
       preferredStartHour,
-      timezoneOffset 
+      timezoneOffset
     } = req.body;
 
     const studyDays = parseInt(requestedDays) || 7;
@@ -25,7 +25,15 @@ const generateAIStudyPlan = async (req, res) => {
 
     // 1. Fetch User and Data
     const user = await prisma.user.findUnique({ where: { id: userId } });
-    const hoursPerDay = requestedHours || user.dailyStudyGoal || user.dailyStudyHours || 4.0;
+    let hoursPerDay = requestedHours || user.dailyStudyGoal || 4.0;
+
+    if (requestedHours) {
+      hoursPerDay = parseFloat(requestedHours);
+      await prisma.user.update({
+        where: { id: userId },
+        data: { dailyStudyGoal: hoursPerDay }
+      });
+    }
 
     const whereClause = { userId };
     if (subjectIds && Array.isArray(subjectIds) && subjectIds.length > 0) {
@@ -47,13 +55,13 @@ const generateAIStudyPlan = async (req, res) => {
     // 2. Calculate User's "Today"
     const nowServer = new Date();
     const nowUser = new Date(nowServer.getTime() + (tzOffset * 60 * 1000));
-    
+
     // Generate dates based on User's local time
     const upcomingDates = [];
     for (let i = 0; i < studyDays; i++) {
-        const d = new Date(nowUser);
-        d.setUTCDate(d.getUTCDate() + i);
-        upcomingDates.push(d.toISOString().split('T')[0]);
+      const d = new Date(nowUser);
+      d.setUTCDate(d.getUTCDate() + i);
+      upcomingDates.push(d.toISOString().split('T')[0]);
     }
 
     const startHour = preferredStartHour || 9;
@@ -68,13 +76,13 @@ const generateAIStudyPlan = async (req, res) => {
 
     const prompt = `You are an AI Study Planner. Create a ${studyDays}-day optimized study schedule.
 Available study time: ${hoursPerDay} hours per day.
-User Timezone Offset: ${tzOffset} minutes (GMT${tzOffset <= 0 ? '+' : '-'}${Math.abs(tzOffset/60)})
+User Timezone Offset: ${tzOffset} minutes (GMT${tzOffset <= 0 ? '+' : '-'}${Math.abs(tzOffset / 60)})
 
 Subjects & Topics (Use these IDs):
 ${subjectsDetails}
 
 Scheduled Dates:
-${upcomingDates.map((d, i) => `Day ${i+1}: ${d}`).join("\n")}
+${upcomingDates.map((d, i) => `Day ${i + 1}: ${d}`).join("\n")}
 
 Rules:
 1. You MUST start the very first session on ${upcomingDates[0]} at exactly ${startTimeFormatted} LOCAL time.
@@ -118,9 +126,9 @@ Return ONLY the JSON object.`;
     const sessions = aiResponse.schedule || aiResponse.sessions || [];
 
     // 4. Clear old sessions from the start of the user's TODAY (local 00:00)
-    const todayUserStart = new Date(upcomingDates[0] + 'T00:00:00Z'); 
+    const todayUserStart = new Date(upcomingDates[0] + 'T00:00:00Z');
     const startRangeUtc = new Date(todayUserStart.getTime() - (tzOffset * 60 * 1000));
-    
+
     // Safety: Also delete any sessions that might have been created for "today" already
     await prisma.studySession.deleteMany({
       where: {
@@ -138,7 +146,7 @@ Return ONLY the JSON object.`;
         // Convert local time string (HH:mm) to UTC Date
         const [startH, startM] = s.startTime.split(':').map(Number);
         const [endH, endM] = s.endTime.split(':').map(Number);
-        
+
         const startDateLocal = new Date(`${s.date}T00:00:00Z`); // Using Z just to get a stable base
         const startTimeUtc = new Date(startDateLocal.getTime() + (startH * 60 + startM - tzOffset) * 60 * 1000);
         const endTimeUtc = new Date(startDateLocal.getTime() + (endH * 60 + endM - tzOffset) * 60 * 1000);
@@ -207,7 +215,7 @@ const chatWithAI = async (req, res) => {
         userSemester = user.semester || "Not specified";
         dailyGoal = user.dailyStudyGoal || 4;
       }
-    } catch (_) {}
+    } catch (_) { }
 
     try {
       const subjects = await prisma.subject.findMany({
@@ -224,7 +232,7 @@ const chatWithAI = async (req, res) => {
           return `- ${s.name}: ${topics} (${exam})`;
         }).join("\n");
       }
-    } catch (_) {}
+    } catch (_) { }
 
     try {
       const tasks = await prisma.task.findMany({
@@ -234,7 +242,7 @@ const chatWithAI = async (req, res) => {
       if (tasks && tasks.length > 0) {
         tasksContext = tasks.map((t) => `- ${t.title}`).join("\n");
       }
-    } catch (_) {}
+    } catch (_) { }
 
     // 2. Build context prompt
     const contextPrompt = `You are StudyMate AI, a helpful study assistant. 

@@ -6,18 +6,36 @@ const generatePlan = async (req, res) => {
         const userId = req.userId;
         const tzOffset = parseInt(timezoneOffset) || 0;
 
+        // 0. Fetch User and Sync Goal
+        const user = await prisma.user.findUnique({ where: { id: userId } });
+        let dailyGoal = user?.dailyStudyGoal || 4.0;
+
+        if (availableHoursPerDay) {
+            dailyGoal = parseFloat(availableHoursPerDay);
+            await prisma.user.update({
+                where: { id: userId },
+                data: { dailyStudyGoal: dailyGoal }
+            });
+        }
+
         // 1. Fetch Subjects and Exams
         const subjects = await prisma.subject.findMany({
             where: { userId: userId },
-            include: { exams: true },
+            include: {
+                exams: true,
+                topics: { where: { isCompleted: false }, orderBy: { difficulty: 'desc' } }
+            },
         });
 
         if (subjects.length === 0) {
             return res.status(400).json({ message: 'No subjects found. Add subjects first.' });
         }
 
+        console.log(`[Planner] Generating plan for user ${userId}. availableHoursPerDay: ${availableHoursPerDay}, current dailyStudyGoal: ${user?.dailyStudyGoal}, final dailyGoal: ${dailyGoal}`);
+
         // 2. Calculate Weights
         const now = new Date();
+
         const subjectWeights = subjects.map(subject => {
             let daysUntilExam = 30; // Default if no exam
             if (subject.exams.length > 0) {
@@ -25,23 +43,27 @@ const generatePlan = async (req, res) => {
                 daysUntilExam = Math.max(1, Math.ceil((earliestExam - now) / (1000 * 60 * 60 * 24)));
             }
             const weight = (subject.priority * subject.difficulty) / Math.sqrt(daysUntilExam);
-            return { id: subject.id, weight };
+            return { id: subject.id, weight, topics: subject.topics };
         });
 
         const totalWeight = subjectWeights.reduce((acc, s) => acc + s.weight, 0);
 
-        // 3. Clear future sessions
+        // 3. Clear future sessions (Timezone Aware)
+        const nowLocal = new Date(now.getTime() + (tzOffset * 60 * 1000));
+        nowLocal.setUTCHours(0, 0, 0, 0);
+        const startOfTodayUtc = new Date(nowLocal.getTime() - (tzOffset * 60 * 1000));
+
         const deletePromise = prisma.studySession.deleteMany({
             where: {
                 subject: { userId: userId },
-                startTime: { gte: now },
+                startTime: { gte: startOfTodayUtc }, // Clear from the start of the user's TODAY
                 isDone: false // Don't delete completed ones
             },
         });
 
         // 4. Distribute hours and create sessions for next 7 days
         const sessionsToCreate = [];
-        
+
         // Calculate start of "today" at 9 AM in user's timezone correctly
         const startOfTodayLocal = new Date(now.getTime() + (tzOffset * 60 * 1000));
         startOfTodayLocal.setUTCHours(9, 0, 0, 0); // Target 9 AM local (treated as UTC here)
@@ -52,8 +74,8 @@ const generatePlan = async (req, res) => {
             let currentStartTimeUtc = new Date(firstSessionStartUtc);
             currentStartTimeUtc.setUTCDate(currentStartTimeUtc.getUTCDate() + day);
 
-            subjectWeights.forEach(sw => {
-                const hoursForThisSubject = (sw.weight / totalWeight) * (availableHoursPerDay || 4);
+            subjectWeights.forEach((sw, index) => {
+                const hoursForThisSubject = (sw.weight / totalWeight) * dailyGoal;
                 if (hoursForThisSubject < 0.5) return; // Skip if less than 30 mins
 
                 const startTimeUtc = new Date(currentStartTimeUtc);
@@ -61,10 +83,17 @@ const generatePlan = async (req, res) => {
 
                 // Only schedule if it's in the future
                 if (startTimeUtc > now) {
+                    // Pick a topic for this session (Syllabus Progress Fix)
+                    // We pick a topic based on rotation or just the first incomplete one
+                    const focusTopic = sw.topics.length > 0
+                        ? sw.topics[day % sw.topics.length].name
+                        : null;
+
                     sessionsToCreate.push({
                         subjectId: sw.id,
                         startTime: startTimeUtc,
                         endTime: endTimeUtc,
+                        focusTopic: focusTopic
                     });
                 }
 
@@ -97,12 +126,12 @@ const getPlan = async (req, res) => {
     try {
         const { timezoneOffset } = req.query;
         const tzOffset = parseInt(timezoneOffset) || 0;
-        
+
         const now = new Date();
-        
+
         // 1. Correctly find the start of THE USER'S TODAY in UTC
         const nowLocal = new Date(now.getTime() + (tzOffset * 60 * 1000));
-        nowLocal.setUTCHours(0, 0, 0, 0); 
+        nowLocal.setUTCHours(0, 0, 0, 0);
         const startOfTodayUtc = new Date(nowLocal.getTime() - (tzOffset * 60 * 1000));
 
         const endRangeUtc = new Date(startOfTodayUtc);
@@ -146,13 +175,13 @@ const toggleSession = async (req, res) => {
             try {
                 // Remove difficulty info like "(Difficulty: 3/5)" for a cleaner match if needed
                 const cleanTopicName = session.focusTopic.split('(')[0].trim();
-                
+
                 await prisma.topic.updateMany({
-                   where: {
-                       subjectId: session.subjectId,
-                       name: { contains: cleanTopicName, mode: 'insensitive' }
-                   },
-                   data: { isCompleted: true }
+                    where: {
+                        subjectId: session.subjectId,
+                        name: { contains: cleanTopicName, mode: 'insensitive' }
+                    },
+                    data: { isCompleted: true }
                 });
             } catch (err) {
                 console.error("Topic Sync Error:", err);
