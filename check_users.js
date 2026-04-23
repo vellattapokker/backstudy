@@ -7,7 +7,7 @@ async function main() {
 
     try {
         await client.connect();
-        const res = await client.query('SELECT id, name, email FROM "User"');
+        const res = await client.query('SELECT id, name, email, role FROM "User"');
         console.log('Users:', res.rows);
     } catch (err) {
         console.error(err);
